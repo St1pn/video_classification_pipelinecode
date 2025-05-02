@@ -1,0 +1,68 @@
+# ***stage1***
+# 提取所有video的音频(两分钟截一段，小于1分钟的丢弃)
+# 1 （可以并行地跑）根据音频拍数判断，过滤拍数很低的纯慢歌且非舞曲的/曲调不含有性张力明显过于悲伤或欢快活泼
+# （损失： <慢歌，但露大腿比例高/背对比例高/双腿分开比例高，且穿黑丝袜、白色网袜、包臀裙、瑜伽裤、Ladies' skinny denim pants>）
+# 2 在1中剩余视频中，process出30s（保留对应的图片训练数据）
+# 3 process出30s：是否出现男性人脸、是否没有真人女性主播、全部帧都不处于站姿（过滤对应视频至剪辑候选，用启发式的剪辑方式看是否能批量处理视频只保留女主播）
+#    prompt: Detect if any male faces presence in this image. Output a valid JSON:  {"male_present": bool, "confidence": float}
+    prompt: Analyze the provided live stream screenshot and answer the following three questions with only "yes" or "no":
+1. [Co-host Connection] 
+Check for:
+- Split-screen layout with two distinct video sources showing the video feeds of different individuals, rather than a dual split-screen or mirrored screen of a single broadcaster.
+
+2. [Replay Window] 
+Check for:
+- Smaller secondary window overlaying the main footage
+- Mismatch between main content and secondary window's visuals
+
+3. [Standing Posture]
+Check for:
+- Visible posture characteristics suggesting upright stance
+
+4. [Male Presence] 
+check for:
+- if there is any male presence in this image
+
+Respond in this exact JSON format:
+{
+  "co_hosting": "yes/no",
+  "replay_window": "yes/no", 
+  "standing_posture": "yes/no",
+  "male_present": "yes/no"
+}
+# ====================至此过滤了慢歌、过滤了男性人脸，datatype：video===================
+
+# ***stage2***
+# 4 在剩余视频中，process出2s、30s
+# 5 30s: 
+#       衣着类型检测(黑丝、白色蕾丝网袜、包臀裙、瑜伽裤、超短裤、超短裙、开叉裙、Ladies' skinny denim pants)
+#        prompt:Ignore figures in the photo frames within the image, answer if she is wearing black stockings or black pantyhose or white lace-like mesh stockings(yes/no)?
+#        prompt:Ignore figures in the photo frames within the image and tell me what she's wearing. You have to strictly choose from the following options: hip-hugging skirt, yoga leggings, micro shorts, micro miniskirt, slit skirt, ladies' skinny denim pants or None of them. Provide your answer in this format: [item selection]
+#        再将对应的img在对应目录下新建类别目录
+# 6 2s：
+#       是否正在跳舞或者扭动身体、是否能看到背部、大腿/小腿
+#       prompt:Ignore figures in the photo frames within the image. Analyze screens left-to-right (screen_1, screen_2...): Thighs: true if hip-to-knee area visible. Calf: true if knee-to-ankle area visible. Back turned: true if spine faces viewer. Dance/twist: true if she is actively dancing or rhythmically twisting her body.Output only a parsable JSON: {screen_1:{thighs:bool ,calves:bool ,back:bool ,dance:bool },...}. Return null for uncertainty. Multi-screen requires per-screen analysis."""
+#       
+#       上半身躯干是否正和大腿成90度夹角、正反弓着腰厥着臀部
+#        prompt:Ignore figures in the photo frames within the image. Analyze screens left-to-right (screen_1, screen_2...): Thighs: true if hip-to-knee area visible. Calves: true if knee-to-ankle area visible.Back turned: true if spine faces viewer.Dance/twist: true if rhythmic motion OR active body twisting (e.g. swaying, undulating).Output JSON: {screen_1:{thighs:bool ,calves:bool ,back:bool ,dance:bool },...}. Return null for uncertainty. Multi-screen requires per-screen analysis.
+#       判断大腿是否正分开着、判断（暂时只能人判断了）
+#        prompt: Ignore figures in the photo frames within the image. Ignore figures in photo frames. Analyze the image following Z-scan order (left-to-right then top-to-bottom) if the image has split-screen layouts. Return JSON with: 1) 'screen_count' (total sub-panels), 2) 'legs_separated' (index array of panel where person's thighs are currently spread apart), 3) 'torso_thigh_90_degree' (array of panels detecting the upper torso of the person forms approximately a 90-degree angle with the thighs), 4) 'body_facing_away' (array of panels showing the body is facing away from the viewer), 5) 'dancing_or_twisting' (array of panels with dynamic movement). Values of the JSON are indexes of panels where detected starting from 1 at top-left, incrementing rightward then downward.Return [null] if no panels match a feature. Assessment should be strictly based on visual elements in the image.
+#       判断身体关节姿态
+#        prompt: Analyze the human figure in the image and output a JSON containing: 1) 'body_facing_forward' (boolean) - whether torso directly faces viewer. 2) 'spinal_twist_angle' (0|45|90) - horizontal spine rotation angle closest to these values. 3) 'spinal_alignment' ('neutral'/'flexion') - whether spine is straight or curved. 4) 'knee_flexion' (0|90|135) - knee bend closest to these angles. 5) 'hip_flexion' (0|45|90) - hip forward bend approximation. 6) 'hip_extension' (yes/no) - backward hip movement. 7) 'ankle_flexion' ('flex'/'extend') - foot position relative to leg. 8) 'c2_rotation' (0|45|90) - atlas-axis joint turn closest value. 9) 'arms_outstretched' (yes/no) - whether arms extend laterally. 10) 'humerus_position' ('anterior flexion'/'posterior extension'/'neither') - upper arm orientation. Prioritize closest angular matches when exact values aren't present. Use strict JSON format without markdown. Exclude explanations. If any parameter can't be determined, return null for that key.
+# 
+#       判断是否站姿、坐姿、跪姿、半蹲、全蹲
+#        prompt:  Ignore figures in the photo frames within the image. Analyze the person's posture in the image. Output JSON with one key "posture" and a value from: ["standing_both_feet" (both feet on ground, no support), "standing_one_foot" (one foot elevated/on object), "sitting", "kneeling", "half_squat", "full_squat", "other"]. Ensure valid JSON syntax.
+# 
+#       判断是否只有部分人像出镜
+#        prompt: Ignore figures in the photo frames within the image. Analyze the image to detect if key human body parts (e.g., face, torso) are missing in the image's view, such as most of the face being cut off or no human present at all. For split-screen layouts (e.g., diptychs/triptychs), check each panel separately for such omissions.Return results in parsable JSON:
+# {
+# "total_panels": 1/2/3,
+# "panels_with_such_omissions": [1/2/3]/"None",
+# "no_human_being_present": true/false
+# }
+
+
+
+
+# 过滤删除明显低质的video：所有30s帧都不处于站立状态、有男性出镜，保留低质图片数据
+# 没有丝袜且全程一直处于站立正对镜头且不露小腿的，删除video（云盘有存全量，保留删除的video.txt即可）
